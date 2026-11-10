@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-epic-flow",
+  "version": "0.1.3",
+  "description": "Epic Flow adapted for Codex: develop ideas, plan, decompose, build and independently check each stage.",
+  "author": {
+    "name": "Biosphere Labs"
+  },
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Epic Flow for Codex",
+        "shortDescription": "Ideas to tested code",
+        "developerName": "Biosphere Labs",
+        "logo": "./assets/icon.png",
+        "capabilities": []
+      }
+    }
+  },
+  "homepage": "https://github.com/biosphere-labs/codex-epic-flow",
+  "repository": "https://github.com/biosphere-labs/codex-epic-flow"
+}
