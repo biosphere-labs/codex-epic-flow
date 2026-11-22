@@ -30,7 +30,7 @@ How far, in the user's words: "through decompose", "from gaps", "only verify", "
 
 ## 2. Where each feature is
 
-Take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
+Read the plan and status together. A passing verify candidate with an in-progress plan always resumes at verify, even if status already says done or is missing. Otherwise take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
 
 | Records | Next stage |
 | --- | --- |

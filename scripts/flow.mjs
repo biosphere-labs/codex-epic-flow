@@ -7,6 +7,10 @@ const A = args || {}
 if (!A.repo || !A.pluginRoot || !Array.isArray(A.features) || A.features.length === 0) {
   throw new Error('epic-flow: start this from $epic-flow-run, which passes repo, pluginRoot and features.')
 }
+const featureNames = A.features.map(f => f && f.slug)
+if (featureNames.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) || new Set(featureNames).size !== featureNames.length) {
+  throw new Error('feature slugs must be unique kebab-case names')
+}
 const VERIFY_ROUNDS = Number.isInteger(A.verifyRounds) ? A.verifyRounds : 2
 
 const CONVENTIONS = `${A.pluginRoot}/conventions.md`
@@ -339,22 +343,22 @@ async function buildParallel(f, groups, concurrency, changes) {
 
   // One group's life: build, then join the train (merges happen one at a time, in finishing order).
   const life = async g => {
-    let r = await runGroup(g)
-    if (r && r.outcome === 'blocked') {
-      changes.push(`group ${g.name}: ${r.summary}`)
-      return { replan: true }
-    }
-    if (r && r.outcome === 'budget') budgetSpent = true
-    if (!r || r.outcome !== 'closed') return { ok: false, why: `group ${g.name} ${r ? r.outcome : 'agent did not return'}: ${r ? r.summary : ''}` }
+    let diagnostic
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt && budgetSpent) return { ok: false, why: `group ${g.name} retry stopped: budget spent` }
+      const result = await runGroup(g, diagnostic)
+      if (result && result.outcome === 'blocked') {
+        changes.push(`group ${g.name}: ${result.summary}`)
+        return { replan: true }
+      }
+      if (result && result.outcome === 'budget') budgetSpent = true
+      if (!result || result.outcome !== 'closed') return { ok: false, why: `group ${g.name}: ${result ? result.summary : 'agent did not return'}` }
       const turn = train.then(() => merge(g))
       train = turn.catch(() => null)
       const m = await turn
       if (m && m.merged) return { ok: true }
-      if (attempt === 0) {
-        const again = await runGroup(g, m ? m.diagnostic : 'the merge agent did not return')
-        if (!again || again.outcome !== 'closed') return { ok: false, why: `group ${g.name} could not be fixed after the train sent it back` }
-      } else return { ok: false, why: `group ${g.name} failed the train twice: ${m ? m.diagnostic : ''}` }
+      diagnostic = m && m.diagnostic || 'the merge agent did not return a diagnostic'
+      if (attempt === 1) return { ok: false, why: `group ${g.name} failed the train twice: ${diagnostic}` }
     }
   }
 

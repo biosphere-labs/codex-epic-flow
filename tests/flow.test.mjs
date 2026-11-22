@@ -402,6 +402,31 @@ await test('group dispatch respects a lower cap', async () => {
   assert.equal(peak, 1)
 })
 
+await test('a retry requesting a seam change drains and replans before another group starts', async () => {
+  const features = [{slug:'p', from:'build', to:'build'}]
+  const { calls, out } = await run({ ...base, features }, (label, prompt, n) => {
+    if (label.endsWith('build plan')) return n === 1
+      ? ready({shape:'parallel', concurrency:1, groups:[{name:'a',tasks:['1']},{name:'b',tasks:['2']}]})
+      : ready({shape:'sequential', tasks:[{id:'1'},{id:'2'}]})
+    if (label.endsWith('group a retry')) return {outcome:'blocked', summary:'update shared seam'}
+    if (label.endsWith('merge a')) return {merged:false, diagnostic:'type mismatch'}
+    if (label.endsWith('contract wave') || label.includes(' group ') || label.includes(' task ')) return closed
+    return label.endsWith('check') ? pass : label.endsWith('finish') ? done : ok
+  })
+  assert.equal(out.results[0].outcome, 'done')
+  assert.ok(calls.includes('p build contract wave'))
+  assert.ok(calls.includes('p build task 2'))
+  assert.ok(!calls.includes('p build group b'))
+})
+
+await test('duplicate feature names are rejected before dispatch', async () => {
+  for (const mode of ['develop','flow']) {
+    let writes = 0
+    await assert.rejects(run({...base, mode, features:[{slug:'dup'},{slug:'dup'}]}, () => { writes++; return done }), /unique/)
+    assert.equal(writes, 0)
+  }
+})
+
 for (const r of results) console.log(r.join('  '))
 const failed = results.filter(r => r[0] === 'FAIL').length
 console.log(`${results.length - failed} passed, ${failed} failed`)

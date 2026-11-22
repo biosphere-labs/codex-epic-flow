@@ -188,7 +188,13 @@ const frozen = new Set(values('--frozen'));
 const manual = new Map();
 for (const spec of values('--edge')) {
   const [from, to] = spec.split('=>');
-  if (!from || !to) throw new Error(`bad --edge ${spec}`);
+  if (!from || !to || spec.split('=>').length !== 2) throw new Error(`bad --edge ${spec}`);
+  for (const endpoint of [from, to]) {
+    const cut = endpoint.lastIndexOf(':');
+    if (cut < 1 || !findDeclarationName(endpoint.slice(0, cut), endpoint.slice(cut + 1))) {
+      throw new Error(`unresolved --edge endpoint: ${endpoint}`);
+    }
+  }
   if (!manual.has(from)) manual.set(from, []);
   manual.get(from).push(to);
 }
