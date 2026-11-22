@@ -1,7 +1,7 @@
 {
   "name": "codex-epic-flow",
-  "version": "0.1.3",
-  "description": "Epic Flow adapted for Codex: develop ideas, plan, decompose, build and independently check each stage.",
+  "version": "0.1.4",
+  "description": "Epic Flow adapted for Codex: develop ideas, plan, decompose, build and independently check completed stages from technical plan through verify.",
   "author": {
     "name": "Biosphere Labs"
   },

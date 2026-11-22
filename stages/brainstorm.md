@@ -61,7 +61,7 @@ status: accepted
 - **Approach.** The chosen design in prose. Conceptual. No file paths, no patches, no task list.
 - **Success.** Observable outcomes, each checkable later without asking what was meant. The technical plan turns them into acceptance criteria.
 - **Out of scope.** Only what the user put there.
-- **Delivery.** Base branch, branch, push, PR, time budget, prerequisites, as in the conventions. **Build shape** only when the user chooses it now from the conventions' options; otherwise the run or build asks.
+- **Delivery.** Base branch, branch, push permission and remote, PR target repository and branch, time budget, prerequisites, as in the conventions. **Build shape** only when the user chooses it now from the conventions' options; otherwise the run or build asks.
 
 Use `draft` while any question for this feature is `open` or the user has not chosen an approach. Open questions live in `questions.md`, not in the brief.
 
@@ -73,7 +73,7 @@ Alone, stop when the brief is written. Give its full path. The next stage is tec
 - [ ] It has **Problem**, **Decisions**, **Approach**, **Success**, **Out of scope** (or no out-of-scope items) and **Delivery**.
 - [ ] **Approach** names no file path.
 - [ ] Each **Success** line is an outcome someone can observe.
-- [ ] **Delivery** names the base branch, the branch, push yes or no, the PR target or no PR, and the prerequisites.
+- [ ] **Delivery** names the base branch, the branch, push yes or no with the authorized destination, the PR target or no PR, and the prerequisites.
 - [ ] `questions.md` has no `open` entry, and every other entry has **Answer** and **Source** filled in.
 - [ ] Each **Out of scope** item traces to a question the user answered or to their words quoted under **Decisions**.
 - [ ] No owner, decider, team or approval step other than the user appears in the brief.

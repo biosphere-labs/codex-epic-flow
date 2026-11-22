@@ -135,7 +135,7 @@ A stage that meets an `open` question that blocks it writes it down, sets `statu
 
 - **Base branch** the work starts from.
 - **Branch** for the work. Default `epic/<slug>`.
-- **Push**: yes or no. **PR**: no, or the branch it targets.
+- **Push**: yes or no. For authorized delivery, record the exact push remote and feature ref. **PR**: no, or the target repository and base branch. For older briefs, resolve a missing destination only when unambiguous from the existing branch tracking configuration or the sole configured remote. Otherwise record a Delivery question and wait before publication.
 - **Time budget** for the unattended part, if there is one.
 - **Prerequisites**: what the environment must have before build (accounts, registries, running services, secrets present as environment variables). Each one is checked before build starts.
 - **Build shape**: `sequential` or `parallel`, chosen by the user from the options in **Build shape** below, with the estimate they chose from. Missing means build asks when it starts.
@@ -170,7 +170,7 @@ Below the front matter, one line per event, newest last:
 
 Build also writes `task <id> started` and `task <id> closed` lines. Build shape estimates come from these lines and the stage lines.
 
-Take the time from `date -u +%FT%TZ`. Each stage writes a line when it starts and when it ends, and sets the front matter both times: on start, `stage` to itself and `state` to `running`; on end, `state` to `done`, `waiting` or `stopped`. `waiting` names the question ids. `stopped` names what failed. `done` means the stage named in `stage` finished; an idea that is `done` is parked. A feature `waiting` at verify is not done.
+Take the time from `date -u +%FT%TZ`. Each stage writes a line when it starts and when it ends, and sets the front matter both times: on start, `stage` to itself and `state` to `running`; on end, use `waiting` or `stopped` for an incomplete stage. A successful stage under independent review remains `running` until its check recorder or finalizer sets `done`. `waiting` names the question ids. `stopped` names what failed. `done` means the stage named in `stage` finished; an idea that is `done` is parked. A feature `waiting` at verify is not done.
 
 ## Running alone and under the run
 
@@ -181,6 +181,8 @@ Take the time from `date -u +%FT%TZ`. Each stage writes a line when it starts an
   - `blocked`: gaps wrote verdict `blocked`, and `status.md` is `waiting` with the question ids.
   - `failed`: verify ran and a criterion failed or was not tested; the responsible tasks are reopened.
   - `error`: the stage could not finish; say what stopped it.
+
+For a run, a writer logs its finished work but leaves the state running pending independent checking. The controller records done following a pass, or stopped on rejection. On interruption, resume the pending stage after checking that its writers have exited.
 
 After each completed stage from technical plan through verify, the run has an independent checker test that stage's **Done when** list against the files. The stage's own summary counts for nothing.
 

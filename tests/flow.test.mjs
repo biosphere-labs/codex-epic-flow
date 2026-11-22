@@ -12,6 +12,7 @@ async function run(args, script) {
   const agent = async (prompt, opts) => {
     calls.push(opts.label)
     seen[opts.label] = (seen[opts.label] || 0) + 1
+    if (opts.label.endsWith(' record')) return { outcome: 'done', summary: 'state recorded' }
     const r = await script(opts.label, prompt, seen[opts.label], opts)
     // Tests written before the build was orchestrated answer the build plan with "done": treat that as a plan with no tasks.
     if (opts.label.endsWith(' build plan') && r && r.outcome === 'done') return { outcome: 'ready', summary: 's', shape: 'sequential', tasks: [] }
@@ -37,7 +38,7 @@ await test('happy path runs five stages, each checked once', async () => {
   const r = out.results[0]
   assert.equal(r.outcome, 'done'); assert.equal(r.stoppedAt, 'verify')
   assert.deepEqual(r.trail.map(t => t.stage), ['technical-plan', 'decompose', 'gaps', 'build', 'verify'])
-  assert.equal(calls.length, 13) // build is plan, acceptance tests and finish, plus its check
+  assert.equal(calls.length, 17) // build is plan, acceptance tests and finish, plus its check
 })
 
 await test('verify failing once sends the feature back to build, then passes', async () => {
@@ -101,7 +102,7 @@ await test('a failed check gets one repair and a recheck', async () => {
   const { out, calls } = await run({ ...base, features: [{ slug: 'f', from: 'decompose', to: 'decompose' }] },
     (label, prompt, n) => (label === 'f decompose check' ? { pass: false, problems: ['no contract:'] } : label.endsWith('recheck') ? pass : done))
   assert.equal(out.results[0].outcome, 'done')
-  assert.deepEqual(calls, ['f decompose', 'f decompose check', 'f decompose repair', 'f decompose recheck'])
+  assert.deepEqual(calls, ['f decompose', 'f decompose check', 'f decompose repair', 'f decompose recheck', 'f decompose record'])
 })
 
 await test('the repair prompt carries the checker problems', async () => {
@@ -382,6 +383,7 @@ await test('a rejected verify check never finalizes', async () => {
     label => label.endsWith('check') ? { pass:false, problems:['new failure'] } : done)
   assert.equal(out.results[0].outcome, 'error')
   assert.ok(!calls.includes('v verify finalize'))
+  assert.equal(calls.at(-1), 'v verify record')
 })
 
 await test('group dispatch respects a lower cap', async () => {

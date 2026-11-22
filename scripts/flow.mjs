@@ -21,7 +21,7 @@ const runContext = slug => [
   'You are working under epic-flow-run, unattended. Nobody will answer a question during this run.',
   `Repository (main checkout): ${A.repo}`,
   `Feature: ${slug}. Records: ${records(slug)}/`,
-  `Read ${CONVENTIONS} first. It defines the records, the status values, the answer order for questions, and what running under epic-flow-run means.`,
+  `Until independent checking finishes, keep the current candidate stage running in status.md even after logging that its work finished. Only the check recorder or verify finalizer marks it done. Read ${CONVENTIONS} first. It defines the records, the status values, the answer order for questions, and what running under epic-flow-run means.`,
 ].join('\n')
 
 // ---------- develop: questioner and answerer draft each brief ----------
@@ -393,10 +393,21 @@ async function buildParallel(f, groups, concurrency, changes) {
   return problems
 }
 
+async function recordCheck(f, stage, state, result) {
+  const recorded = await agent([
+    runContext(f.slug),
+    `Update only status.md. Set stage to ${stage} and state to ${state}. Append a UTC event with the independent check result: ${result.summary}. Read back the record before returning done.`,
+  ].join('\n'), { label: `${f.slug} ${stage} record`, phase: 'Flow', schema: STAGE_RESULT })
+  if (!recorded || recorded.outcome !== 'done') {
+    return { outcome: 'error', summary: `${result.summary}; could not record ${stage} ${state}` }
+  }
+  return result
+}
+
 async function finishCheckedStage(f, stage, result, check) {
-  if (stage !== 'verify') return result
+  if (stage !== 'verify') return recordCheck(f, stage, 'done', result)
   if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(check.commit || '')) {
-    return { outcome: 'error', summary: 'verify checker did not identify the checked commit' }
+    return recordCheck(f, stage, 'stopped', { outcome: 'error', summary: 'verify checker did not identify the checked commit' })
   }
   return await agent([
     runContext(f.slug),
@@ -424,7 +435,7 @@ async function runStage(f, stage, note) {
 
   c = await agent(checkPrompt(f, stage), { label: `${tag} recheck`, phase: 'Flow', schema: CHECK })
   if (c && c.pass) return finishCheckedStage(f, stage, r, c)
-  return { outcome: 'error', summary: `the checker still fails it after one repair:\n- ${c ? c.problems.join('\n- ') : 'the checker did not return'}` }
+  return recordCheck(f, stage, 'stopped', { outcome: 'error', summary: `the checker still fails it after one repair:\n- ${c ? c.problems.join('\n- ') : 'the checker did not return'}` })
 }
 
 async function flow(f) {

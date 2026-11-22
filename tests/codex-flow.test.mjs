@@ -7,6 +7,14 @@ const one = () => startFlow(args([{ slug: 'one', from: 'technical-plan', to: 'te
 const done = { outcome: 'done', summary: 'stage files written' };
 const pass = { pass: true, problems: [] };
 
+async function recordCheckedStage(run) {
+  const { jobs } = await run.snapshot()
+  assert.equal(jobs.length, 1)
+  assert.match(jobs[0].options.label, / record$/)
+  run.claim(jobs[0].id)
+  run.complete(jobs[0].id, done)
+}
+
 test('queue drives a real scheduler stage and its independent check', async () => {
   const run = one();
   let s = await run.snapshot();
@@ -19,6 +27,7 @@ test('queue drives a real scheduler stage and its independent check', async () =
   assert.equal(s.jobs[0].options.label, 'one technical-plan check');
   assert.match(s.jobs[0].prompt, /Trust no summary/);
   run.claim(s.jobs[0].id); run.complete(s.jobs[0].id, pass);
+  await recordCheckedStage(run);
   s = await run.snapshot();
   assert.equal(s.state, 'done');
   assert.equal(s.result.results[0].outcome, 'done');
@@ -41,6 +50,7 @@ test('bad agent JSON cannot satisfy a checker or silently consume its job', asyn
   const repair = s.jobs[0].id; run.claim(repair);run.complete(repair, done);
   s = await run.snapshot();const recheck=s.jobs[0].id;
   run.claim(recheck);run.complete(recheck,pass);
+  await recordCheckedStage(run);
   assert.equal((await run.snapshot()).result.results[0].outcome, 'done');
   assert.throws(() => run.complete(recheck,pass), /not running/);
 });
@@ -57,6 +67,7 @@ test('failed agent blocks dependents while independent feature completes', async
   const s2=await run.snapshot();
   assert.equal(s2.jobs.length,1);assert.equal(s2.jobs[0].options.label,'c gaps check');
   run.claim(s2.jobs[0].id);run.complete(s2.jobs[0].id,pass);
+  await recordCheckedStage(run);
   const result=(await run.snapshot()).result.results;
   assert.deepEqual(result.map(r=>r.outcome),['error','blocked','done']);
 });

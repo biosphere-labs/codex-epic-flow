@@ -26,11 +26,11 @@ What, in any mix:
 
 How far, in the user's words: "through decompose", "from gaps", "only verify", "stop before build". No range means each feature from its next stage through verify. One range applies to every feature unless they name one per feature.
 
-**One stage, with the user here.** When the range is a single stage for one feature ("only gaps", "just brainstorm", "decompose this one") and the user has not said to leave it unattended, run that stage in this conversation: read `<plugin>/stages/<stage>.md` and follow it as the conventions' **Alone** says. For a completed stage dispatch a fresh independent checker against its Done when list. Only run verify finalization after that checker passes the candidate SHA. If it fails or cannot run, record the stage stopped. Skip the workflow and the steps below. Brainstorm always runs this way for a single feature: it is a conversation with the user.
+**One stage, with the user here.** When the range is a single stage for one feature ("only gaps", "just brainstorm", "decompose this one") and the user has not said to leave it unattended, run that stage in this conversation: read `<plugin>/stages/<stage>.md` and follow it as the conventions' **Alone** says. Keep the stage running until its check passes. Record done on a pass and stopped with reasons on a rejection. For a completed stage dispatch a fresh independent checker against its Done when list. Only run verify finalization after that checker passes the candidate SHA. If it fails or cannot run, record the stage stopped. Skip the workflow and the steps below. Brainstorm always runs this way for a single feature: it is a conversation with the user.
 
 ## 2. Where each feature is
 
-Read the plan and status together. A passing verify candidate with an in-progress plan always resumes at verify, even if status already says done or is missing. Otherwise take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
+Read the plan and status together. A passing verify candidate with an in-progress plan always resumes at verify, even if status already says done or is missing. For a stage still running or stopped, inspect live workers, wait for existing writers to exit, and resume that same stage. Otherwise take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
 
 | Records | Next stage |
 | --- | --- |
@@ -75,7 +75,7 @@ From here the main conversation writes `brief.md` and `questions.md` in place of
 
 1. One line per feature: what its draft says it is, and how many answers were assumed. Give the brief's full path.
 2. Every open question across all features, including those from `waiting` features. Use the host’s user-input tool when available, otherwise ask in chat, within the tool’s supported question limit, recommended answer first, header the feature's slug. A question with no sensible options goes in plain text.
-3. **Delivery**, once for all features, with "same for all" offered: base branch, branch, push, PR target, time budget, prerequisites.
+3. **Delivery**, once for all features, with "same for all" offered: base branch, branch, push permission and remote, PR target repository and branch, time budget, prerequisites.
 4. **Build shape**, for every feature whose range includes decompose or build. It decides decompose's output too (a contract commit or `contract: none`). Do the shape analysis in the conventions' **Build shape** first: one read-only agent per feature, all in one message, each returning its groups, longest chain and risk reasons, while you read the machine and the timings once. Then offer each feature its Sequential and Parallel options, each with its time range, risk and reasons, and write the choice to its Delivery. This is the last question of the run: once the user has chosen, nothing asks them again.
 5. When the user adds detail instead of answering, fold it into that brief and ask only what remains. When the user says "best guess", "use your defaults" or "don't ask me", settle the rest as brainstorm step 5 says, and take the lower-risk build shape.
 6. Write each answer into `questions.md` with **Source** "the user, run question session". Set a brief to `accepted` when none of its questions is `open` and it has an approach. A feature with a question still open stays `draft` and leaves this run; say which.
