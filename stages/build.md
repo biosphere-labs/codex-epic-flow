@@ -100,7 +100,7 @@ When the Delivery time budget is spent, counted from the `build started` line in
 ## Delivery
 
 - Commit on the feature branch, and on group branches when parallel. Never on the base branch.
-- Push and open a PR only when Delivery says so, against the branch it names. The PR body lists each acceptance criterion, the tasks that serve it, and their check results.
+- Leave delivery to verify after its independent check. A build-only run ends with local commits.
 
 ## Progress
 
@@ -121,6 +121,6 @@ When every task is `closed`, leave the technical plan `in-progress`. Alone, stop
 - [ ] With a contract commit: the feature branch in `<repo>/.worktrees/<slug>/` contains it and has commits after it; `git diff <contract>` is empty for each `whole` contract file and touches only stub bodies in each `declarations` file, or `status.md` records a contract wave for each changed declaration.
 - [ ] With `contract: none`: the feature branch has a commit for each closed task, and each seam a task produced exists in the code with the signature that task wrote.
 - [ ] No commit this build made on the feature branch is on the base branch.
-- [ ] If Delivery says no push, the feature branch has no upstream. If a PR was opened, its URL is in `status.md`.
+- [ ] This build made no push or PR.
 - [ ] When an acceptance branch was written, it exists as `<branch>-acceptance` with a commit, and it changes only test files.
 - [ ] `status.md` has a `build finished` line.

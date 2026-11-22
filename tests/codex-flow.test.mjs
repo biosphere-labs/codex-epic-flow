@@ -176,7 +176,7 @@ test('failed contract waves do not release a group retry or its dependents', asy
     if(label.endsWith(' plan'))return {outcome:'ready',summary:'s',shape:'parallel',groups:[{name:'a',tasks:['1']},{name:'b',tasks:['2'],after:['a']}]};
     if(label.endsWith('acceptance tests'))return {pass:true,summary:'s'};
     if(label.endsWith('group a'))return {outcome:'blocked',summary:'needs contract'};
-    if(label.endsWith('contract wave a'))return {outcome:'open',summary:'contract checks failed'};
+    if(label.endsWith('contract wave'))return {outcome:'open',summary:'contract checks failed'};
     return done;
   });
   assert.equal(result.snapshot.result.results[0].outcome,'error');

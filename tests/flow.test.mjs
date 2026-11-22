@@ -25,7 +25,7 @@ async function run(args, script) {
 
 const base = { repo: '/r', pluginRoot: '/p' }
 const done = { outcome: 'done', summary: 's' }
-const pass = { pass: true, problems: [] }
+const pass = { pass: true, problems: [], commit: 'a'.repeat(40) }
 const results = []
 async function test(name, fn) {
   try { await fn(); results.push(['PASS', name]) } catch (e) { results.push(['FAIL', name, e.message.split('\n')[0]]) }
@@ -37,7 +37,7 @@ await test('happy path runs five stages, each checked once', async () => {
   const r = out.results[0]
   assert.equal(r.outcome, 'done'); assert.equal(r.stoppedAt, 'verify')
   assert.deepEqual(r.trail.map(t => t.stage), ['technical-plan', 'decompose', 'gaps', 'build', 'verify'])
-  assert.equal(calls.length, 12) // build is plan, acceptance tests and finish, plus its check
+  assert.equal(calls.length, 13) // build is plan, acceptance tests and finish, plus its check
 })
 
 await test('verify failing once sends the feature back to build, then passes', async () => {
@@ -314,7 +314,7 @@ await test('parallel: a group starts when what it needs has merged; independent 
   const order = []
   const s = async label => {
     order.push(label)
-    if (label.endsWith('build plan')) return ready({ shape: 'parallel', groups: [
+    if (label.endsWith('build plan')) return ready({ shape: 'parallel', concurrency: 3, groups: [
       { name: 'a', tasks: ['1'] }, { name: 'b', tasks: ['2'], after: ['a'] }, { name: 'c', tasks: ['3'] }] })
     if (label === 'p build group c') { await sleep(40); order.push(label + ' end'); return closed }
     if (label.includes(' group ')) return closed
@@ -330,7 +330,7 @@ await test('parallel: a group starts when what it needs has merged; independent 
 await test('parallel: the train sends a failing group back once with its diagnostic, then stops what needs it', async () => {
   let retryPrompt = ''
   const s = (label, prompt) => {
-    if (label.endsWith('build plan')) return ready({ shape: 'parallel', groups: [{ name: 'a', tasks: ['1'] }, { name: 'b', tasks: ['2'], after: ['a'] }] })
+    if (label.endsWith('build plan')) return ready({ shape: 'parallel', concurrency: 3, groups: [{ name: 'a', tasks: ['1'] }, { name: 'b', tasks: ['2'], after: ['a'] }] })
     if (label === 'q build group a retry') retryPrompt = prompt
     if (label.includes(' group ')) return closed
     if (label === 'q build merge a') return { merged: false, diagnostic: 'TypeError at join' }
@@ -346,7 +346,7 @@ await test('parallel: the train sends a failing group back once with its diagnos
 await test('parallel: merges happen one at a time', async () => {
   let inTrain = 0, most = 0
   const s = async label => {
-    if (label.endsWith('build plan')) return ready({ shape: 'parallel', groups: [{ name: 'a', tasks: ['1'] }, { name: 'b', tasks: ['2'] }, { name: 'c', tasks: ['3'] }] })
+    if (label.endsWith('build plan')) return ready({ shape: 'parallel', concurrency: 3, groups: [{ name: 'a', tasks: ['1'] }, { name: 'b', tasks: ['2'] }, { name: 'c', tasks: ['3'] }] })
     if (label.includes(' group ')) return closed
     if (label.includes(' merge ')) { inTrain++; most = Math.max(most, inTrain); await sleep(5); inTrain--; return { merged: true } }
     return label.endsWith('check') ? pass : label.endsWith('finish') ? done : ok
@@ -360,6 +360,46 @@ await test('a build plan that is waiting stops before any builder', async () => 
     label => (label.endsWith('build plan') ? { outcome: 'waiting', summary: 'Q-9', questions: ['Q-9'] } : done))
   assert.deepEqual(calls, ['x build plan'])
   assert.equal(out.results[0].outcome, 'waiting'); assert.deepEqual(out.results[0].questions, ['Q-9'])
+})
+
+await test('verify-only failure stays inside the requested range', async () => {
+  const { out, calls } = await run({ ...base, features: [{slug:'v', from:'verify', to:'verify'}] },
+    () => ({ outcome:'failed', summary:'regression' }))
+  assert.deepEqual(calls, ['v verify'])
+  assert.equal(out.results[0].outcome, 'failed')
+})
+
+await test('a chain listed backwards propagates a waiting root', async () => {
+  const features = ['leaf', 'middle', 'root'].map((slug, index, all) => ({
+    slug, from:'gaps', to:'gaps', after: all.slice(index + 1, index + 2),
+  }))
+  const { out } = await run({ ...base, features }, () => ({ outcome:'waiting', summary:'Q-1' }))
+  assert.deepEqual(out.results.map(r => r.outcome), ['blocked', 'blocked', 'waiting'])
+})
+
+await test('a rejected verify check never finalizes', async () => {
+  const { out, calls } = await run({ ...base, features:[{slug:'v', from:'verify', to:'verify'}] },
+    label => label.endsWith('check') ? { pass:false, problems:['new failure'] } : done)
+  assert.equal(out.results[0].outcome, 'error')
+  assert.ok(!calls.includes('v verify finalize'))
+})
+
+await test('group dispatch respects a lower cap', async () => {
+  let active = 0, peak = 0
+  const { out } = await run({ ...base, features:[{slug:'p', from:'build', to:'build'}] }, async label => {
+    if (label.endsWith('plan')) return ready({shape:'parallel', concurrency:1,
+      groups:['a','b','c'].map(name => ({name, tasks:[name]}))})
+    if (label.includes(' group ')) {
+      peak = Math.max(peak, ++active)
+      await sleep(5)
+      active--
+      return closed
+    }
+    if (label.includes(' merge ')) return {merged:true}
+    return label.endsWith('check') ? pass : label.endsWith('finish') ? done : ok
+  })
+  assert.equal(out.results[0].outcome, 'done')
+  assert.equal(peak, 1)
 })
 
 for (const r of results) console.log(r.join('  '))

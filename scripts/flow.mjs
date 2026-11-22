@@ -125,6 +125,7 @@ const STAGE_RESULT = {
 const CHECK = {
   type: 'object',
   properties: {
+    commit: { type: 'string', description: 'For a passing verify check, full checked feature HEAD' },
     pass: { type: 'boolean' },
     problems: { type: 'array', items: { type: 'string' }, description: 'each Done when item that does not hold, with the evidence' },
   },
@@ -146,6 +147,7 @@ const checkPrompt = (f, stage) => [
   codeStages.has(stage)
     ? `Test every item against the records, the worktree at ${A.repo}/.worktrees/${f.slug}/ and its git log. Re-run the commands the records cite as evidence; a recorded result you cannot reproduce fails its item.`
     : 'Test every item against the records and the repository.',
+  stage === 'verify' ? 'Confirm the clean feature HEAD before and after the checks equals the candidate in verify.md. Return that full SHA as commit.' : '',
   'Change nothing: no edits, no commits, and revert anything a command leaves behind.',
   'Return pass true only when every item holds. List each item that does not, with the evidence.',
 ].join('\n')
@@ -170,6 +172,7 @@ const BUILD_PLAN = {
       description: 'sequential: the open tasks in build order, each with the task ids it depends on',
       items: { type: 'object', properties: { id: { type: 'string' }, dependsOn: { type: 'array', items: { type: 'string' } } }, required: ['id'] },
     },
+    concurrency: { type: 'integer', description: 'Positive parallel group limit from Delivery and current machine capacity' },
     groups: {
       type: 'array',
       description: 'parallel: each group, its task ids, and the groups that must merge before it starts',
@@ -202,11 +205,11 @@ const buildContext = (f, part) => [
   `You are one part of the Epic Flow build for this feature, driven by the run's workflow. Read ${skillFile('build')} for the rules; do only your part: ${part}`,
 ].join('\n')
 
-async function buildStage(f, note) {
+async function buildStage(f, note, recovery = true) {
   const tag = `${f.slug} build`
   const plan = await agent([
     buildContext(f, 'the plan.'),
-    'Do "Before you start", "Choose the shape" and "Groups". Write `build started`, the `build shape:` line and notes/build-groups.md. Build nothing.',
+    'Do "Before you start", "Choose the shape" and "Groups". Preserve the original start time on retries. Return concurrency for parallel plans. Write `build started`, the `build shape:` line and notes/build-groups.md. Build nothing.',
     note || '',
     'Return outcome ready with the shape and either the open tasks in build order (sequential) or the groups (parallel); waiting with the question ids; or error.',
   ].filter(Boolean).join('\n'), { label: `${tag} plan`, phase: 'Flow', schema: BUILD_PLAN })
@@ -224,6 +227,7 @@ async function buildStage(f, note) {
     return { outcome: 'error', summary: 'sequential build plan is not in dependency order' }
   }
   if (plan.shape === 'parallel') {
+    if (plan.concurrency !== undefined && !(Number.isSafeInteger(plan.concurrency) && plan.concurrency > 0)) return { outcome: 'error', summary: 'invalid parallel concurrency' }
     const tasks = collection.flatMap(group => group.tasks || [])
     if (new Set(tasks).size !== tasks.length) return { outcome: 'error', summary: 'a task belongs to more than one build group' }
   }
@@ -233,11 +237,24 @@ async function buildStage(f, note) {
     + ' Follow "Acceptance tests during the build". Touch no product code and nothing outside your own worktree.'),
     { label: `${tag} acceptance tests`, phase: 'Flow', schema: TESTED })
 
-  const problems = plan.shape === 'parallel' ? await buildParallel(f, plan.groups || []) : await buildSequential(f, plan.tasks || [])
+  const changes = []
+  const problems = plan.shape === 'parallel'
+    ? await buildParallel(f, plan.groups, plan.concurrency ?? 1, changes)
+    : await buildSequential(f, plan.tasks, changes)
   const acceptanceResult = await acceptance
   if (!acceptanceResult || acceptanceResult.pass !== true) {
     problems.push(`acceptance tests failed: ${acceptanceResult ? acceptanceResult.summary : 'the acceptance agent did not return'}`)
   }
+
+  if (changes.length && recovery && !problems.length) {
+    const wave = await agent(buildContext(f, `Resolve these contract requests together after all writers, tests and merges stopped: ${changes.join('; ')}. Follow the contract-change rules for the recorded shape, reopen affected tasks, preserve unmerged work and rerun the slices. Return closed only after the updated seams are ready.`),
+      { label: `${tag} contract wave`, phase: 'Flow', schema: PIECE })
+    if (wave && wave.outcome === 'closed') {
+      return buildStage(f, 'Replan remaining tasks from disk after the contract change. Recompute groups, dependencies and acceptance tests.', false)
+    }
+    problems.push(wave ? wave.summary : 'contract agent did not return')
+  }
+  problems.push(...changes)
 
   const finish = await agent([
     buildContext(f, 'the finish.'),
@@ -249,7 +266,7 @@ async function buildStage(f, note) {
   return finish || { outcome: 'error', summary: 'the build finish agent did not return' }
 }
 
-async function buildSequential(f, tasks) {
+async function buildSequential(f, tasks, changes) {
   const tag = `${f.slug} build`
   const problems = []
   const failed = new Set()
@@ -265,7 +282,7 @@ async function buildSequential(f, tasks) {
   for (let i = 0; i < tasks.length; i++) {
     const t = tasks[i]
     await next
-    next = i + 1 < tasks.length ? prepare(tasks[i + 1]) : null // starts now, while task i builds
+    next = !budgetSpent && i + 1 < tasks.length ? prepare(tasks[i + 1]) : null // starts now, while task i builds
     // A producer's landing tests are part of its output gate. Independent
     // tasks can proceed while those tests run; dependents must wait.
     await Promise.all((t.dependsOn || []).map(id => tested.get(id)))
@@ -279,6 +296,11 @@ async function buildSequential(f, tasks) {
       + ' Follow "Sequential" for one task: use its prepared brief when there is one, write it, run its check and falsification probe, commit. Return closed, open (check failed), blocked (needs a seam changed), or budget (the time budget is spent; change nothing).'),
       { label: `${tag} task ${t.id}`, phase: 'Flow', schema: PIECE })
     if (!r || r.outcome !== 'closed') {
+      if (r && r.outcome === 'blocked') {
+        changes.push(`task ${t.id}: ${r.summary}`)
+        await next
+        break
+      }
       if (r && r.outcome === 'budget') budgetSpent = true
       failed.add(t.id)
       problems.push(`task ${t.id} ${r ? r.outcome : 'agent did not return'}: ${r ? r.summary : ''}`)
@@ -296,7 +318,7 @@ async function buildSequential(f, tasks) {
   return problems
 }
 
-async function buildParallel(f, groups) {
+async function buildParallel(f, groups, concurrency, changes) {
   const tag = `${f.slug} build`
   const problems = []
   const merged = new Set()
@@ -304,6 +326,7 @@ async function buildParallel(f, groups) {
   const names = new Set(groups.map(g => g.name))
   const pending = groups.slice()
   const running = new Map()
+  let budgetSpent = false
   let train = Promise.resolve()
 
   const runGroup = (g, diagnostic) => agent(buildContext(f, `build group ${g.name} (tasks ${g.tasks.join(', ')}).`
@@ -318,10 +341,10 @@ async function buildParallel(f, groups) {
   const life = async g => {
     let r = await runGroup(g)
     if (r && r.outcome === 'blocked') {
-      const wave = await agent(buildContext(f, `run a small contract wave for group ${g.name}: ${r.summary}`), { label: `${tag} contract wave ${g.name}`, phase: 'Flow', schema: PIECE })
-      if (!wave || wave.outcome !== 'closed') return { ok: false, why: `contract wave for group ${g.name} did not close: ${wave ? wave.summary : 'agent did not return'}` }
-      r = await runGroup(g, `The contract wave returned closed: ${wave.summary}. Verify the updated contract commit is on the feature branch before changing code.`)
+      changes.push(`group ${g.name}: ${r.summary}`)
+      return { replan: true }
     }
+    if (r && r.outcome === 'budget') budgetSpent = true
     if (!r || r.outcome !== 'closed') return { ok: false, why: `group ${g.name} ${r ? r.outcome : 'agent did not return'}: ${r ? r.summary : ''}` }
     for (let attempt = 0; attempt < 2; attempt++) {
       const turn = train.then(() => merge(g))
@@ -336,7 +359,9 @@ async function buildParallel(f, groups) {
   }
 
   while (pending.length || running.size) {
+    const before = pending.length
     for (const g of pending.slice()) {
+      if (changes.length || budgetSpent || running.size >= concurrency) break
       const after = g.after || []
       const unknown = after.filter(n => !names.has(n) || n === g.name)
       const dead = after.filter(n => stopped.has(n))
@@ -349,16 +374,31 @@ async function buildParallel(f, groups) {
       pending.splice(pending.indexOf(g), 1)
     }
     if (!running.size) {
+      if (changes.length || budgetSpent) break
+      if (pending.length < before) continue
       for (const g of pending) { stopped.add(g.name); problems.push(`group ${g.name} not started: its after list forms a cycle`) }
       break
     }
     // Event: a group finished its life (merged or stopped). Start whatever that unblocks.
     const { name, res } = await Promise.race(running.values())
     running.delete(name)
+    if (res && res.replan) continue
     if (res && res.ok) merged.add(name)
     else { stopped.add(name); problems.push(res ? res.why : `group ${name} failed`) }
   }
   return problems
+}
+
+async function finishCheckedStage(f, stage, result, check) {
+  if (stage !== 'verify') return result
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(check.commit || '')) {
+    return { outcome: 'error', summary: 'verify checker did not identify the checked commit' }
+  }
+  return await agent([
+    runContext(f.slug),
+    `Follow "After the independent check" in ${skillFile('verify')} for commit ${check.commit}. Return done only after delivery and closure are recorded.`,
+  ].join('\n'), { label: `${f.slug} verify finalize`, phase: 'Flow', schema: STAGE_RESULT }) ||
+    { outcome: 'error', summary: 'verification finalizer did not return' }
 }
 
 async function runStage(f, stage, note) {
@@ -370,7 +410,7 @@ async function runStage(f, stage, note) {
   if (r.outcome !== 'done') return r
 
   let c = await agent(checkPrompt(f, stage), { label: `${tag} check`, phase: 'Flow', schema: CHECK })
-  if (c && c.pass) return r
+  if (c && c.pass) return finishCheckedStage(f, stage, r, c)
 
   const problems = c ? c.problems.join('\n- ') : 'the checker did not return'
   r = await agent(stagePrompt(f, stage, `An independent checker found that these Done when items do not hold. Fix them, then return:\n- ${problems}`),
@@ -379,7 +419,7 @@ async function runStage(f, stage, note) {
   if (r.outcome !== 'done') return r
 
   c = await agent(checkPrompt(f, stage), { label: `${tag} recheck`, phase: 'Flow', schema: CHECK })
-  if (c && c.pass) return r
+  if (c && c.pass) return finishCheckedStage(f, stage, r, c)
   return { outcome: 'error', summary: `the checker still fails it after one repair:\n- ${c ? c.problems.join('\n- ') : 'the checker did not return'}` }
 }
 
@@ -399,7 +439,7 @@ async function flow(f) {
     trail.push({ stage, outcome: r.outcome, summary: r.summary })
     note = ''
     if (r.outcome === 'done') { i++; continue }
-    if (stage === 'verify' && r.outcome === 'failed' && buildRounds < VERIFY_ROUNDS) {
+    if (stage === 'verify' && r.outcome === 'failed' && from <= STAGES.indexOf('build') && buildRounds < VERIFY_ROUNDS) {
       buildRounds++
       log(`${f.slug}: verify failed; build again (${buildRounds} of ${VERIFY_ROUNDS})`)
       note = `Verify failed and reopened tasks. Build the reopened and new tasks only. Verify reported:\n${r.summary}`
@@ -428,6 +468,7 @@ const outcome = Object.create(null)
 const pending = A.features.slice()
 const running = new Map()
 while (pending.length || running.size) {
+  const before = pending.length
   for (const f of pending.slice()) {
     const after = f.after || []
     const missing = after.filter(s => !slugs.has(s) || s === f.slug)
@@ -440,6 +481,7 @@ while (pending.length || running.size) {
     pending.splice(pending.indexOf(f), 1)
   }
   if (!running.size) {
+    if (pending.length < before) continue
     for (const f of pending) outcome[f.slug] = { slug: f.slug, outcome: 'error', stoppedAt: f.from, summary: 'after forms a cycle', trail: [] }
     break
   }

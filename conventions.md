@@ -182,7 +182,7 @@ Take the time from `date -u +%FT%TZ`. Each stage writes a line when it starts an
   - `failed`: verify ran and a criterion failed or was not tested; the responsible tasks are reopened.
   - `error`: the stage could not finish; say what stopped it.
 
-After each stage, the run has an independent checker test that stage's **Done when** list against the files. The stage's own summary counts for nothing.
+After each completed stage from technical plan through verify, the run has an independent checker test that stage's **Done when** list against the files. The stage's own summary counts for nothing.
 
 ## Every stage
 
