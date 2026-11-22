@@ -136,7 +136,7 @@ await test('a range runs only its own stages', async () => {
 
 await test('a range that is not a range is an error without agents', async () => {
   const { out, calls } = await run({ ...base, features: [{ slug: 'j', from: 'verify', to: 'gaps' }] }, () => done)
-  assert.equal(out.results[0].outcome, 'error'); assert.equal(calls.length, 0)
+  assert.equal(out.results[0].outcome, 'error'); assert.ok(calls.every(label => label.endsWith(' record')))
 })
 
 await test('missing args throw', async () => {
@@ -226,7 +226,7 @@ await test('an unknown or circular after is an error, not a guess', async () => 
   const { out, calls } = await run({ ...base, features: [
     { slug: 'a', from: 'build', to: 'build', after: ['b'] }, { slug: 'b', from: 'build', to: 'build', after: ['a'] },
     { slug: 'c', from: 'build', to: 'build', after: ['zzz'] }] }, label => (label.endsWith('check') ? pass : done))
-  assert.equal(calls.length, 0)
+  assert.ok(calls.every(label => label.endsWith(' record')))
   assert.deepEqual(out.results.map(r => r.outcome), ['error', 'error', 'error'])
 })
 
@@ -235,7 +235,7 @@ await test('an unknown or circular after is an error, not a guess', async () => 
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const ready = (extra) => ({ outcome: 'ready', summary: 's', ...extra })
-const closed = { outcome: 'closed', summary: 's' }
+const closed = { outcome: 'closed', summary: 's', commit: 'b'.repeat(40) }
 const ok = { pass: true, summary: 's' }
 
 await test('a feature starts the moment the one it needs finishes, not when a slow unrelated one does', async () => {
@@ -427,6 +427,34 @@ await test('duplicate feature names are rejected before dispatch', async () => {
     await assert.rejects(run({...base, mode, features:[{slug:'dup'},{slug:'dup'}]}, () => { writes++; return done }), /unique/)
     assert.equal(writes, 0)
   }
+})
+
+await test('malformed dependency lists fail before any writer starts', async () => {
+  let writers = 0
+  const features = [{slug:'a',from:'gaps',to:'gaps'}, {slug:'b',from:'gaps',to:'gaps',after:'a'}]
+  await assert.rejects(run({...base,features}, () => { writers++; return done }), /array/)
+  assert.equal(writers,0)
+})
+
+await test('a missing reviewer leaves the candidate intact', async () => {
+  const features = [{slug:'a',from:'gaps',to:'gaps'}]
+  const { out, calls } = await run({...base,features}, label => label.endsWith('check') ? null : done)
+  assert.equal(out.results[0].outcome, 'error')
+  assert.match(out.results[0].summary, /unavailable/)
+  assert.deepEqual(calls, ['a gaps','a gaps check','a gaps record'])
+})
+
+await test('landing checks name their own immutable task revisions', async () => {
+  const features = [{slug:'a',from:'build',to:'build'}]
+  const observed = []
+  await run({...base,features}, (label, prompt) => {
+    if (label.endsWith('plan')) return ready({shape:'sequential',tasks:[{id:'1'},{id:'2'}]})
+    if (label.includes(' task ')) return {...closed, commit:label.at(-1).repeat(40)}
+    if (label.includes(' test ')) observed.push([label.at(-1), prompt])
+    return label.endsWith('finish') ? done : label.endsWith('check') ? pass : ok
+  })
+  assert.equal(observed.length, 2)
+  for (const [id,prompt] of observed) assert.ok(prompt.includes(id.repeat(40)))
 })
 
 for (const r of results) console.log(r.join('  '))

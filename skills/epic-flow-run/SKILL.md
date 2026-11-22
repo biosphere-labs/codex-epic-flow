@@ -30,7 +30,7 @@ How far, in the user's words: "through decompose", "from gaps", "only verify", "
 
 ## 2. Where each feature is
 
-Read the plan and status together. A passing verify candidate with an in-progress plan always resumes at verify, even if status already says done or is missing. For a stage still running or stopped, inspect live workers, wait for existing writers to exit, and resume that same stage. Otherwise take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
+Read the plan and status together. For an ordinary resume, failed verify with reopened tasks resumes at build. An explicit verify-only request reports the open tasks and stops within its range. A passing verify candidate with an in-progress plan always resumes at verify, even if status already says done or is missing. For a stage still running or stopped, inspect live workers, wait for existing writers to exit, and resume that same stage. Otherwise take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
 
 | Records | Next stage |
 | --- | --- |

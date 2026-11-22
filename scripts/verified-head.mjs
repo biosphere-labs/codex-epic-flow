@@ -9,7 +9,7 @@ if (process.argv.length < 4 || process.argv.length > 5 ||
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trimEnd();
 function checkWorktree() {
   if (git('symbolic-ref', 'HEAD') !== 'refs/heads/' + branch ||
-      git('rev-parse', 'HEAD') !== sha || git('status', '--porcelain') !== '') {
+      git('rev-parse', 'HEAD') !== sha || git('status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none') !== '') {
     throw new Error('feature branch, checked SHA and clean worktree must match');
   }
 }
@@ -19,7 +19,7 @@ if (remote !== undefined) {
     throw new Error('use the authorized configured remote name');
   }
   const ref = 'refs/heads/' + branch;
-  git('push', '--', remote, sha + ':' + ref);
+  git('push', '--no-follow-tags', '--recurse-submodules=no', '--', remote, sha + ':' + ref);
   // Read the push destination, which may differ from the remote fetch URL.
   for (const url of git('remote', 'get-url', '--push', '--all', remote).split('\n')) {
     if (git('ls-remote', '--exit-code', '--refs', '--', url, ref) !== sha + '\t' + ref) {

@@ -68,6 +68,7 @@ test('failed agent blocks dependents while independent feature completes', async
   assert.equal(s2.jobs.length,1);assert.equal(s2.jobs[0].options.label,'c gaps check');
   run.claim(s2.jobs[0].id);run.complete(s2.jobs[0].id,pass);
   await recordCheckedStage(run);
+  await recordCheckedStage(run); // dependent feature stopped without starting its writer
   const result=(await run.snapshot()).result.results;
   assert.deepEqual(result.map(r=>r.outcome),['error','blocked','done']);
 });
@@ -100,12 +101,12 @@ test('a dependent builder waits for producer landing tests, while independent ta
   answer(s.jobs.find(j=>j.options.label.endsWith('prepare 001')), {pass:true,summary:'s'});
   s=await run.snapshot();
   answer(s.jobs.find(j=>j.options.label.endsWith('prepare 002')), {pass:true,summary:'s'});
-  answer(s.jobs.find(j=>j.options.label.endsWith('task 001')), {outcome:'closed',summary:'s'});
+  answer(s.jobs.find(j=>j.options.label.endsWith('task 001')), {outcome:'closed',summary:'s',commit:'b'.repeat(40)});
   s=await run.snapshot();
   assert.ok(s.jobs.some(j=>j.options.label.endsWith('task 002')));
   const producerTest=s.jobs.find(j=>j.options.label.endsWith('test 001'));
   answer(s.jobs.find(j=>j.options.label.endsWith('prepare 003')), {pass:true,summary:'s'});
-  answer(s.jobs.find(j=>j.options.label.endsWith('task 002')), {outcome:'closed',summary:'s'});
+  answer(s.jobs.find(j=>j.options.label.endsWith('task 002')), {outcome:'closed',summary:'s',commit:'b'.repeat(40)});
   s=await run.snapshot();
   assert.ok(!s.jobs.some(j=>j.options.label.endsWith('task 003')));
   answer(producerTest,{pass:false,summary:'001 broke'});
@@ -126,7 +127,7 @@ test('a missing landing-test agent stops its dependent builder', async () => {
   for(const j of s.jobs)answer(j,{pass:true,summary:'s'});
   s=await run.snapshot();
   answer(s.jobs.find(j=>j.options.label.endsWith('prepare 002')),{pass:true,summary:'s'});
-  answer(s.jobs.find(j=>j.options.label.endsWith('task 001')),{outcome:'closed',summary:'s'});
+  answer(s.jobs.find(j=>j.options.label.endsWith('task 001')),{outcome:'closed',summary:'s',commit:'b'.repeat(40)});
   s=await run.snapshot();
   assert.equal(s.jobs.length,1);
   run.claim(s.jobs[0].id);run.fail(s.jobs[0].id);

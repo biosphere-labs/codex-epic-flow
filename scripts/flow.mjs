@@ -11,6 +11,10 @@ const featureNames = A.features.map(f => f && f.slug)
 if (featureNames.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)) || new Set(featureNames).size !== featureNames.length) {
   throw new Error('feature slugs must be unique kebab-case names')
 }
+if (A.features.some(f => f.after !== undefined && (!Array.isArray(f.after) || f.after.some(name => typeof name !== 'string')))) {
+  throw new Error('after must be an array of feature names')
+}
+const fullCommit = value => typeof value === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value)
 const VERIFY_ROUNDS = Number.isInteger(A.verifyRounds) ? A.verifyRounds : 2
 
 const CONVENTIONS = `${A.pluginRoot}/conventions.md`
@@ -189,6 +193,7 @@ const PIECE = {
   type: 'object',
   properties: {
     outcome: { type: 'string', enum: ['closed', 'open', 'blocked', 'budget'] },
+    commit: { type: 'string', description: 'Sequential closed task: full landed commit SHA' },
     summary: { type: 'string' },
   },
   required: ['outcome', 'summary'],
@@ -297,7 +302,7 @@ async function buildSequential(f, tasks, changes) {
       continue
     }
     const r = await agent(buildContext(f, `build task ${t.id}, and only that task.`
-      + ' Follow "Sequential" for one task: use its prepared brief when there is one, write it, run its check and falsification probe, commit. Return closed, open (check failed), blocked (needs a seam changed), or budget (the time budget is spent; change nothing).'),
+      + ' Follow "Sequential" for one task: use its prepared brief when there is one, write it, run its check and falsification probe, commit and return its full SHA in commit. Return closed, open (check failed), blocked (needs a seam changed), or budget (the time budget is spent; change nothing).'),
       { label: `${tag} task ${t.id}`, phase: 'Flow', schema: PIECE })
     if (!r || r.outcome !== 'closed') {
       if (r && r.outcome === 'blocked') {
@@ -310,9 +315,14 @@ async function buildSequential(f, tasks, changes) {
       problems.push(`task ${t.id} ${r ? r.outcome : 'agent did not return'}: ${r ? r.summary : ''}`)
       continue
     }
+    if (!fullCommit(r.commit)) {
+      failed.add(t.id)
+      problems.push(`task ${t.id} did not identify its landed commit`)
+      continue
+    }
     // Event: task committed. Its tests run in the background; a failure stops what depends on it.
     const testing = agent(buildContext(f, `test task ${t.id} as it landed.`
-      + ' Follow "Test as each task lands": in a scratch worktree at the current feature branch tip, run the tests for the code task ' + t.id + ' changed. On a failure, set that task open with the diagnostic under **Check**. Change no code.'),
+      + ' Follow "Test as each task lands": in a detached scratch worktree at exactly ' + r.commit + ', confirm HEAD equals that SHA, then run the tests for the code task ' + t.id + ' changed. On a failure, set that task open with the diagnostic under **Check**. Change no code.'),
       { label: `${tag} test ${t.id}`, phase: 'Flow', schema: TESTED })
       .then(x => { if (!x || !x.pass) { failed.add(t.id); problems.push(`task ${t.id} failed its tests after landing: ${x ? x.summary : 'the test agent did not return'}`) } })
     tests.push(testing)
@@ -396,7 +406,7 @@ async function buildParallel(f, groups, concurrency, changes) {
 async function recordCheck(f, stage, state, result) {
   const recorded = await agent([
     runContext(f.slug),
-    `Update only status.md. Set stage to ${stage} and state to ${state}. Append a UTC event with the independent check result: ${result.summary}. Read back the record before returning done.`,
+    `Update only status.md. Set stage to ${stage} and state to ${state}. Append a UTC event with the workflow result: ${result.summary}. Read back the record before returning done.`,
   ].join('\n'), { label: `${f.slug} ${stage} record`, phase: 'Flow', schema: STAGE_RESULT })
   if (!recorded || recorded.outcome !== 'done') {
     return { outcome: 'error', summary: `${result.summary}; could not record ${stage} ${state}` }
@@ -406,7 +416,7 @@ async function recordCheck(f, stage, state, result) {
 
 async function finishCheckedStage(f, stage, result, check) {
   if (stage !== 'verify') return recordCheck(f, stage, 'done', result)
-  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(check.commit || '')) {
+  if (!fullCommit(check.commit)) {
     return recordCheck(f, stage, 'stopped', { outcome: 'error', summary: 'verify checker did not identify the checked commit' })
   }
   return await agent([
@@ -427,7 +437,8 @@ async function runStage(f, stage, note) {
   let c = await agent(checkPrompt(f, stage), { label: `${tag} check`, phase: 'Flow', schema: CHECK })
   if (c && c.pass) return finishCheckedStage(f, stage, r, c)
 
-  const problems = c ? c.problems.join('\n- ') : 'the checker did not return'
+  if (!c) return recordCheck(f, stage, 'stopped', { outcome: 'error', summary: 'independent checker unavailable; candidate pending review' })
+  const problems = c.problems.join('\n- ')
   r = await agent(stagePrompt(f, stage, `An independent checker found that these Done when items do not hold. Fix them, then return:\n- ${problems}`),
     { label: `${tag} repair`, phase: 'Flow', schema: STAGE_RESULT })
   if (!r) return { outcome: 'error', summary: 'the repair agent did not return' }
@@ -435,7 +446,8 @@ async function runStage(f, stage, note) {
 
   c = await agent(checkPrompt(f, stage), { label: `${tag} recheck`, phase: 'Flow', schema: CHECK })
   if (c && c.pass) return finishCheckedStage(f, stage, r, c)
-  return recordCheck(f, stage, 'stopped', { outcome: 'error', summary: `the checker still fails it after one repair:\n- ${c ? c.problems.join('\n- ') : 'the checker did not return'}` })
+  const reason = c ? `the checker still fails it after one repair:\n- ${c.problems.join('\n- ')}` : 'independent recheck unavailable; repaired candidate pending review'
+  return recordCheck(f, stage, 'stopped', { outcome: 'error', summary: reason })
 }
 
 async function flow(f) {
@@ -505,6 +517,14 @@ while (pending.length || running.size) {
   running.delete(slug)
   outcome[slug] = r || { slug, outcome: 'error', summary: 'the feature chain failed' }
 }
+// Waiting features never acquired a stage writer. Persist their reason as well.
+await Promise.all(A.features.map(async f => {
+  const result = outcome[f.slug]
+  if (!result.trail?.length && result.outcome !== 'done' && STAGES.includes(f.from)) {
+    const recorded = await recordCheck(f, f.from, 'stopped', result)
+    outcome[f.slug] = { ...result, ...recorded }
+  }
+}))
 return { mode: 'flow', results: A.features.map(f => outcome[f.slug]) }
 
 }

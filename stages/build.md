@@ -44,7 +44,7 @@ While one task builds, a read-only agent prepares the next one's brief in `notes
 
 ### Test as each task lands
 
-When a task is committed, a background agent runs that task's tests and its examples, in a scratch worktree at the feature branch tip, while the next task builds. A failure sets the task `open` with the diagnostic under **Check**, and the tasks that depend on it are not started. A break shows minutes after it lands, not at the end.
+When a task is committed, a background agent runs that task's tests and its examples, in a detached scratch worktree at the full commit SHA returned by that task’s builder, while the next task builds. A failure sets the task `open` with the diagnostic under **Check**, and the tasks that depend on it are not started. A break shows minutes after it lands, not at the end.
 
 ### Acceptance tests during the build
 

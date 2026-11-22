@@ -25,6 +25,8 @@ test('delivery publishes the clean checked commit to the chosen push destination
     return git('rev-parse','HEAD');
   };
   const build = commit('build');
+  git('config','push.followTags','true');
+  git('-c','user.name=Test','-c','user.email=test@example.invalid','tag','-a','draft','-m','draft');
   const checked = commit('acceptance-test');
   assert.equal(deliver(checked,'feature'), checked);
   assert.equal(git('--git-dir=.git/publish','for-each-ref'),'');
@@ -34,6 +36,8 @@ test('delivery publishes the clean checked commit to the chosen push destination
   assert.equal(deliver(checked,'feature','fork'),checked);
   assert.equal(git('--git-dir=.git/publish','rev-parse','refs/heads/feature'),checked);
   assert.equal(git('--git-dir=.git/read','for-each-ref'),'');
+  assert.equal(git('--git-dir=.git/publish','tag','--list'),'');
+  git('config','status.showUntrackedFiles','no');
   writeFileSync(join(dir,'dirty'),'dirty');
   assert.throws(() => deliver(checked,'feature','fork'));
 });
