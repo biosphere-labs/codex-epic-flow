@@ -44,6 +44,7 @@ test('bad agent JSON cannot satisfy a checker or silently consume its job', asyn
   const check = s.jobs[0].id; run.claim(check);
   assert.throws(() => run.complete(check, { pass: 'true', problems: [] }), /boolean/);
   run.complete(check, { pass: false, problems: ['AC-1 missing'] });
+  await recordCheckedStage(run); // persist the rejection before any repair starts
   s = await run.snapshot();
   assert.match(s.jobs[0].options.label, /repair$/);
   assert.match(s.jobs[0].prompt, /AC-1 missing/);
@@ -65,8 +66,12 @@ test('failed agent blocks dependents while independent feature completes', async
   assert.deepEqual(s.jobs.map(j=>j.options.label), ['a gaps','c gaps']);
   for (const j of s.jobs) { run.claim(j.id); if(j.options.label.startsWith('a'))run.fail(j.id);else run.complete(j.id,done); }
   const s2=await run.snapshot();
-  assert.equal(s2.jobs.length,1);assert.equal(s2.jobs[0].options.label,'c gaps check');
-  run.claim(s2.jobs[0].id);run.complete(s2.jobs[0].id,pass);
+  assert.equal(s2.jobs.length,2);
+  const rejected = s2.jobs.find(job => job.options.label === 'a gaps record');
+  const checker = s2.jobs.find(job => job.options.label === 'c gaps check');
+  assert.match(rejected.prompt, /state to stopped/);
+  run.claim(rejected.id);run.complete(rejected.id,done);
+  run.claim(checker.id);run.complete(checker.id,pass);
   await recordCheckedStage(run);
   await recordCheckedStage(run); // dependent feature stopped without starting its writer
   const result=(await run.snapshot()).result.results;
@@ -115,6 +120,7 @@ test('a dependent builder waits for producer landing tests, while independent ta
   assert.ok(!s.jobs.some(j=>j.options.label.endsWith('task 003')));
   assert.match(s.jobs[0].prompt,/task 003 skipped/);
   answer(s.jobs[0],{outcome:'error',summary:'dependency failed'});
+  await recordCheckedStage(run);
   assert.equal((await run.snapshot()).result.results[0].outcome,'error');
 });
 
@@ -136,6 +142,7 @@ test('a missing landing-test agent stops its dependent builder', async () => {
   assert.match(s.jobs[0].prompt,/test agent did not return/);
   assert.match(s.jobs[0].prompt,/task 002 skipped/);
   answer(s.jobs[0],{outcome:'error',summary:'missing tester'});
+  await recordCheckedStage(run);
   assert.equal((await run.snapshot()).result.results[0].outcome,'error');
 });
 
@@ -163,9 +170,9 @@ test('ready plans require shape, collection and unique dependency-ordered tasks'
     {outcome:'ready',summary:'backwards',shape:'sequential',tasks:[{id:'2',dependsOn:['1']},{id:'1'}]},
     {outcome:'ready',summary:'shared writer',shape:'parallel',groups:[{name:'a',tasks:['1']},{name:'b',tasks:['1']}]},
   ]) {
-    const result=await drive(startFlow(args([{slug:'one',from:'build',to:'build'}])),()=>plan);
+    const result=await drive(startFlow(args([{slug:'one',from:'build',to:'build'}])),job=>job.options.label.endsWith(' record')?done:plan);
     assert.equal(result.snapshot.result.results[0].outcome,'error');
-    assert.deepEqual(result.labels,['one build plan']);
+    assert.deepEqual(result.labels,['one build plan','one build record']);
   }
 });
 

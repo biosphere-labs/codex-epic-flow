@@ -6,13 +6,13 @@ const { runFlow } = await import(process.argv[2] || new URL('../scripts/flow.mjs
 const body = runFlow;
 
 // script: (label, prompt, callIndexForLabelPrefix) => result
-async function run(args, script) {
+async function run(args, script, recorder = () => ({ outcome: 'done', summary: 'state recorded' })) {
   const calls = []
   const seen = {}
   const agent = async (prompt, opts) => {
     calls.push(opts.label)
     seen[opts.label] = (seen[opts.label] || 0) + 1
-    if (opts.label.endsWith(' record')) return { outcome: 'done', summary: 'state recorded' }
+    if (opts.label.endsWith(' record')) return recorder(opts.label, prompt)
     const r = await script(opts.label, prompt, seen[opts.label], opts)
     // Tests written before the build was orchestrated answer the build plan with "done": treat that as a plan with no tasks.
     if (opts.label.endsWith(' build plan') && r && r.outcome === 'done') return { outcome: 'ready', summary: 's', shape: 'sequential', tasks: [] }
@@ -95,14 +95,14 @@ await test('gaps blocked stops the feature before build; another feature carries
 await test('a blocked or waiting stage is not sent to the checker', async () => {
   const { calls } = await run({ ...base, features: [{ slug: 'w', from: 'technical-plan', to: 'verify' }] },
     label => (label === 'w technical-plan' ? { outcome: 'waiting', summary: 'Q-1' } : label.endsWith('check') ? pass : done))
-  assert.deepEqual(calls, ['w technical-plan'])
+  assert.deepEqual(calls, ['w technical-plan', 'w technical-plan record'])
 })
 
 await test('a failed check gets one repair and a recheck', async () => {
   const { out, calls } = await run({ ...base, features: [{ slug: 'f', from: 'decompose', to: 'decompose' }] },
     (label, prompt, n) => (label === 'f decompose check' ? { pass: false, problems: ['no contract:'] } : label.endsWith('recheck') ? pass : done))
   assert.equal(out.results[0].outcome, 'done')
-  assert.deepEqual(calls, ['f decompose', 'f decompose check', 'f decompose repair', 'f decompose recheck', 'f decompose record'])
+  assert.deepEqual(calls, ['f decompose', 'f decompose check', 'f decompose record', 'f decompose repair', 'f decompose recheck', 'f decompose record'])
 })
 
 await test('the repair prompt carries the checker problems', async () => {
@@ -359,14 +359,14 @@ await test('parallel: merges happen one at a time', async () => {
 await test('a build plan that is waiting stops before any builder', async () => {
   const { out, calls } = await run({ ...base, features: [{ slug: 'x', from: 'build', to: 'verify' }] },
     label => (label.endsWith('build plan') ? { outcome: 'waiting', summary: 'Q-9', questions: ['Q-9'] } : done))
-  assert.deepEqual(calls, ['x build plan'])
+  assert.deepEqual(calls, ['x build plan', 'x build record'])
   assert.equal(out.results[0].outcome, 'waiting'); assert.deepEqual(out.results[0].questions, ['Q-9'])
 })
 
 await test('verify-only failure stays inside the requested range', async () => {
   const { out, calls } = await run({ ...base, features: [{slug:'v', from:'verify', to:'verify'}] },
     () => ({ outcome:'failed', summary:'regression' }))
-  assert.deepEqual(calls, ['v verify'])
+  assert.deepEqual(calls, ['v verify', 'v verify record'])
   assert.equal(out.results[0].outcome, 'failed')
 })
 
@@ -455,6 +455,167 @@ await test('landing checks name their own immutable task revisions', async () =>
   })
   assert.equal(observed.length, 2)
   for (const [id,prompt] of observed) assert.ok(prompt.includes(id.repeat(40)))
+})
+
+await test('distinct later contract requests each receive recovery', async () => {
+  let plans = 0, waves = 0
+  const { out } = await run({...base,features:[{slug:'contracts',from:'build',to:'build'}]}, label => {
+    if (label.endsWith('plan')) {
+      plans++
+      return ready({shape:'parallel',concurrency:1,groups:[{name:'a',tasks:['1']},{name:'b',tasks:['2']}]})
+    }
+    if (label.endsWith('contract wave')) { waves++; return closed }
+    if (label.endsWith('group a') && plans === 1) return {outcome:'blocked',summary:'Alpha seam'}
+    if (label.endsWith('group b') && plans === 2) return {outcome:'blocked',summary:'Beta seam'}
+    if (label.includes(' group ')) return closed
+    if (label.includes(' merge ')) return {merged:true}
+    return label.endsWith('check') ? pass : label.endsWith('finish') ? done : ok
+  })
+  assert.equal(out.results[0].outcome,'done')
+  assert.equal(waves,2)
+  assert.equal(plans,3)
+})
+
+await test('a repeated unresolved contract request terminates', async () => {
+  let waves = 0
+  const { out } = await run({...base,features:[{slug:'contracts',from:'build',to:'build'}]}, label => {
+    if (label.endsWith('plan')) return ready({shape:'sequential',tasks:[{id:'1'}]})
+    if (label.endsWith('contract wave')) { waves++; return closed }
+    if (label.endsWith('task 1')) return {outcome:'blocked',summary:'same seam'}
+    return label.endsWith('finish') ? done : ok
+  })
+  assert.equal(out.results[0].outcome,'error')
+  assert.match(out.results[0].summary,/repeated without resolving/)
+  assert.equal(waves,1)
+})
+
+await test('an exception preserves the current stage and completed trail', async () => {
+  const {out,calls} = await run({...base,features:[{slug:'exception',from:'technical-plan',to:'verify'}]}, label => {
+    if (label === 'exception verify check') throw new Error('review transport failed')
+    return label.endsWith('check') ? pass : done
+  })
+  const result=out.results[0]
+  assert.equal(result.stoppedAt,'verify')
+  assert.equal(result.outcome,'error')
+  assert.equal(result.trail.at(-1).stage,'verify')
+  assert.equal(result.trail.length,5)
+  assert.equal(calls.at(-1),'exception verify record')
+})
+
+await test('changing diagnostics cannot evade the contract wave limit', async () => {
+  let plans=0,waves=0
+  const {out}=await run({...base,contractRounds:2,features:[{slug:'bounded',from:'build',to:'build'}]},label=>{
+    if(label.endsWith('plan')){plans++;return ready({shape:'sequential',tasks:[{id:'1'}]})}
+    if(label.endsWith('contract wave')){waves++;return closed}
+    if(label.endsWith('task 1'))return {outcome:'blocked',summary:`same seam, attempt ${plans}`}
+    return label.endsWith('finish')?done:ok
+  })
+  assert.equal(waves,2)
+  assert.equal(out.results[0].outcome,'error')
+  assert.match(out.results[0].summary,/contract recovery limit/)
+})
+
+await test('a thrown group error drains other workers and merges before return', async () => {
+  let active=0,merged=false
+  const {out}=await run({...base,features:[{slug:'drain',from:'build',to:'build'}]},async label=>{
+    if(label.endsWith('plan'))return ready({shape:'parallel',concurrency:2,groups:[{name:'a',tasks:['1']},{name:'b',tasks:['2']}]})
+    if(label.endsWith('group a')){await sleep(5);throw new Error('transport failed')}
+    if(label.endsWith('group b')){active++;await sleep(30);active--;return closed}
+    if(label.endsWith('merge b')){merged=true;return {merged:true}}
+    if(label.endsWith('finish')){assert.equal(active,0);assert.equal(merged,true);return done}
+    return ok
+  })
+  assert.equal(active,0)
+  assert.equal(merged,true)
+  assert.equal(out.results[0].outcome,'error')
+})
+
+
+await test('a checker cannot approve while reporting problems', async () => {
+  const {out,calls}=await run({...base,features:[{slug:'contradiction',from:'verify',to:'verify'}]},label=>
+    label.endsWith('check') ? {...pass,problems:['AC-1 failed']} : done)
+  assert.equal(out.results[0].outcome,'error')
+  assert.equal(calls.includes('contradiction verify finalize'),false)
+  assert.equal(calls.at(-1),'contradiction verify record')
+})
+
+await test('finalizer failure requests a stop record without rebuilding product code', async () => {
+  for (const value of [null,{outcome:'failed',summary:'delivery problem'},{outcome:'error',summary:'delivery error'}]) {
+    const {out,calls}=await run({...base,features:[{slug:'delivery',from:'build',to:'verify'}]},label=>
+      label.endsWith('finalize') ? value : label.endsWith('check') ? pass : done)
+    assert.equal(out.results[0].outcome,'error')
+    assert.equal(calls.filter(x=>x==='delivery build plan').length,1)
+    assert.equal(calls.at(-1),'delivery verify record')
+  }
+})
+
+await test('pending contract changes prevent a fresh merge-retry writer', async () => {
+  let plans=0
+  const {out,calls}=await run({...base,features:[{slug:'retry',from:'build',to:'build'}]},async label=>{
+    if(label.endsWith('plan'))return ++plans===1 ? ready({shape:'parallel',concurrency:2,groups:[{name:'a',tasks:['1']},{name:'b',tasks:['2']}]}) : ready({shape:'sequential',tasks:[]})
+    if(label.endsWith('group a'))return {outcome:'blocked',summary:'seam change'}
+    if(label.endsWith('group b')){await sleep(10);return closed}
+    if(label.endsWith('merge b'))return {merged:false,diagnostic:'old seam failed'}
+    if(label.endsWith('contract wave'))return closed
+    return label.endsWith('check')?pass:label.endsWith('finish')?done:ok
+  })
+  assert.equal(calls.includes('retry build group b retry'),false)
+  assert.equal(calls.filter(x=>x.endsWith('contract wave')).length,1)
+  assert.equal(out.results[0].outcome,'done')
+})
+
+await test('contract recovery preserves independent acceptance and sibling failures', async () => {
+  for (const failure of ['acceptance','sibling']) {
+    const {out,calls}=await run({...base,features:[{slug:'mixed',from:'build',to:'build'}]},label=>{
+      if(label.endsWith('plan'))return ready({shape:'parallel',concurrency:2,groups:[{name:'a',tasks:['1']},{name:'b',tasks:['2']}]})
+      if(label.endsWith('group a'))return {outcome:'blocked',summary:'seam change'}
+      if(label.endsWith('group b'))return failure==='sibling'?{outcome:'open',summary:'sibling check failed'}:closed
+      if(label.endsWith('merge b'))return {merged:true}
+      if(label.endsWith('acceptance tests'))return failure==='acceptance'?{pass:false,summary:'acceptance failed'}:ok
+      if(label.endsWith('contract wave'))return closed
+      return label.endsWith('finish')?done:ok
+    })
+    assert.equal(calls.filter(x=>x.endsWith('contract wave')).length,1)
+    assert.equal(out.results[0].outcome,'error')
+    assert.match(out.results[0].summary,new RegExp(failure))
+    assert.match(out.results[0].summary,/other build failures remain/)
+  }
+})
+
+
+await test('rejection recorder completes before repair and retains the diagnosis on repair crash', async () => {
+  const records=[]
+  const {out,calls}=await run({...base,features:[{slug:'crash',from:'verify',to:'verify'}]},label=>{
+    if(label.endsWith('check'))return {pass:false,problems:['AC-7 route disconnected']}
+    if(label.endsWith('repair')){assert.equal(records.length,1);throw new Error('repair transport crash')}
+    return done
+  },(label,prompt)=>{records.push(prompt);return done})
+  assert.equal(out.results[0].outcome,'error')
+  assert.ok(calls.indexOf('crash verify record')<calls.indexOf('crash verify repair'))
+  assert.equal(records.length,2)
+  for(const prompt of records)assert.match(prompt,/AC-7 route disconnected/)
+})
+
+await test('failure to persist rejection prevents starting repair', async () => {
+  const {out,calls}=await run({...base,features:[{slug:'disk',from:'gaps',to:'gaps'}]},label=>
+    label.endsWith('check')?{pass:false,problems:['missing coverage']}:done,()=>null)
+  assert.equal(out.results[0].outcome,'error')
+  assert.match(out.results[0].summary,/could not record/)
+  assert.equal(calls.includes('disk gaps repair'),false)
+})
+
+await test('scheduler-generated build failures request stopped records', async () => {
+  for(const invalidPlan of [true,false]) {
+    const records=[]
+    const {out}=await run({...base,features:[{slug:'record',from:'build',to:'build'}]},label=>{
+      if(label.endsWith('plan'))return invalidPlan?{outcome:'ready',shape:'invalid'}:ready({shape:'sequential',tasks:[{id:'1'}]})
+      if(label.endsWith('task 1'))return {outcome:'closed',summary:'missing sha'}
+      return label.endsWith('finish')?done:ok
+    },(label,prompt)=>{records.push(prompt);return done})
+    assert.equal(out.results[0].outcome,'error')
+    assert.equal(records.length,1)
+    assert.match(records[0],/Set stage to build and state to stopped/)
+  }
 })
 
 for (const r of results) console.log(r.join('  '))

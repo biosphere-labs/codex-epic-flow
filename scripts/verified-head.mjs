@@ -8,6 +8,12 @@ if (process.argv.length < 4 || process.argv.length > 5 ||
 }
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trimEnd();
 function checkWorktree() {
+  // These flags can hide tracked edits even from status and diff. Require a
+  // fully visible index rather than treating an opaque worktree as verified.
+  const indexes = [git('ls-files', '-v', '-z'), git('submodule', 'foreach', '--quiet', '--recursive', 'git ls-files -v -z')]
+  const hidden = indexes.join('\0').split('\0').filter(entry => entry &&
+    (entry[0] === 'S' || entry[0] === entry[0].toLowerCase()));
+  if (hidden.length) throw new Error('cannot verify clean worktree with assume-unchanged or skip-worktree flags; clear the flags and rerun verification');
   if (git('symbolic-ref', 'HEAD') !== 'refs/heads/' + branch ||
       git('rev-parse', 'HEAD') !== sha || git('status', '--porcelain', '--untracked-files=all', '--ignore-submodules=none') !== '') {
     throw new Error('feature branch, checked SHA and clean worktree must match');

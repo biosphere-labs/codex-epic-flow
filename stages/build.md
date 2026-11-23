@@ -93,6 +93,10 @@ With `contract: none`, every seam in the code matches the signature its producin
 - A failed check leaves the task `open`, with the failure under **Check**.
 - When the code and a task disagree, leave the task `open`, write what disagrees, and send it back to gaps before building it.
 
+## Contract recovery limit
+
+The run permits up to four contract waves per build invocation, with a lower or higher explicit `contractRounds` run argument when needed. A repeated identical request stops sooner. When the limit is reached, preserve the blocked tasks and diagnostics for the next run.
+
 ## Time budget
 
 When the Delivery time budget is spent, counted from the `build started` line in `status.md`, start no new task or group. Let running ones finish and merge. Write `budget spent` and the `open` task ids to `status.md`.
@@ -124,3 +128,5 @@ When every task is `closed`, leave the technical plan `in-progress`. Alone, stop
 - [ ] This build made no push or PR.
 - [ ] When an acceptance branch was written, it exists as `<branch>-acceptance` with a commit, and it changes only test files.
 - [ ] `status.md` has a `build finished` line.
+
+When one group requests a contract change, drain existing writers and merge attempts but start no merge-retry writer on the old contract. Resolve the contract wave even if a sibling or acceptance-test author also failed. Preserve those other failures: stop after the wave and resume them from disk instead of declaring the build done.
