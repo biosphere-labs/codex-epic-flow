@@ -2,7 +2,7 @@
 
 Epic Flow takes an idea through planning, decomposition, build and verification
 in Codex. You settle the open questions and delivery choices at the start. Then
-agents work through the stages, and a fresh agent checks each stage from the
+agents work through the stages, and a fresh agent checks each completed stage from technical plan through verify against the
 files before the next one starts.
 
 ## Install

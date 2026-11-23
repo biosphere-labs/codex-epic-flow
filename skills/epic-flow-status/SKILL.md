@@ -32,7 +32,7 @@ Report where each feature is and what runs next. This skill reads files only. It
 
 1. Find `<repo>` with `git rev-parse --show-toplevel` in the main checkout. Records are in `<repo>/.epic-flow/<slug>/`.
 2. For each feature, read `status.md` first. Take the stage and state from its front matter and the time from its last event line.
-3. When `status.md` is missing, infer the stage from the records, and mark the row **inferred**:
+3. Always reconcile the plan with verify.md. For an ordinary resume, failed verify with reopened tasks resumes at build. An explicit verify-only request reports the open tasks and stops within its range. A passing candidate with an in-progress plan still needs verify, even when status already says done. Report verify pending finalization and give the resume command. When `status.md` is missing, infer the stage from the records, and mark the row **inferred**:
    - `brief.md` is `idea` or `draft`: brainstorm is next.
    - `brief.md` is `accepted` and no plan exists: technical plan is next.
    - `brief.md` has `plan:`: report it under that plan's slug.

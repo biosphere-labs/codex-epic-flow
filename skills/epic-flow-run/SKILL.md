@@ -26,11 +26,11 @@ What, in any mix:
 
 How far, in the user's words: "through decompose", "from gaps", "only verify", "stop before build". No range means each feature from its next stage through verify. One range applies to every feature unless they name one per feature.
 
-**One stage, with the user here.** When the range is a single stage for one feature ("only gaps", "just brainstorm", "decompose this one") and the user has not said to leave it unattended, run that stage in this conversation: read `<plugin>/stages/<stage>.md` and follow it as the conventions' **Alone** says. Skip the workflow and the steps below. Brainstorm always runs this way for a single feature: it is a conversation with the user.
+**One stage, with the user here.** When the range is a single stage for one feature ("only gaps", "just brainstorm", "decompose this one") and the user has not said to leave it unattended, run that stage in this conversation: read `<plugin>/stages/<stage>.md` and follow it as the conventions' **Alone** says. Keep the stage running until its check passes. Record done on a pass and stopped with reasons on a rejection. For a completed stage dispatch a fresh independent checker against its Done when list. Only run verify finalization after that checker passes the candidate SHA. If it fails or cannot run, record the stage stopped. Skip the workflow and the steps below. Brainstorm always runs this way for a single feature: it is a conversation with the user.
 
 ## 2. Where each feature is
 
-Take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
+Read the plan and status together. For an ordinary resume, failed verify with reopened tasks resumes at build. An explicit verify-only request reports the open tasks and stops within its range. A passing verify candidate with an in-progress plan always resumes at verify, even if status already says done or is missing. For a stage still running or stopped, inspect live workers, wait for existing writers to exit, and resume that same stage. Otherwise take each feature's next stage from `status.md`. When `status.md` is missing, take it from the records:
 
 | Records | Next stage |
 | --- | --- |
@@ -40,6 +40,7 @@ Take each feature's next stage from `status.md`. When `status.md` is missing, ta
 | `contract:` set (a sha or `none`), no `gaps.md`, or verdict `blocked` | gaps |
 | verdict `clear`, a task `open` or `blocked` | build |
 | every task `closed`, `verify.md` missing or not `passed` | verify |
+| plan in-progress with a passing verify candidate | verify, including the independent check and finalization |
 | plan `closed` | nothing; leave it out |
 
 A feature whose `status.md` is `waiting` goes to the question session with its open questions, then resumes at that stage. A feature whose next stage lies past the end of the range is left out.
@@ -74,7 +75,7 @@ From here the main conversation writes `brief.md` and `questions.md` in place of
 
 1. One line per feature: what its draft says it is, and how many answers were assumed. Give the brief's full path.
 2. Every open question across all features, including those from `waiting` features. Use the host’s user-input tool when available, otherwise ask in chat, within the tool’s supported question limit, recommended answer first, header the feature's slug. A question with no sensible options goes in plain text.
-3. **Delivery**, once for all features, with "same for all" offered: base branch, branch, push, PR target, time budget, prerequisites.
+3. **Delivery**, once for all features, with "same for all" offered: base branch, branch, push permission and remote, PR target repository and branch, time budget, prerequisites.
 4. **Build shape**, for every feature whose range includes decompose or build. It decides decompose's output too (a contract commit or `contract: none`). Do the shape analysis in the conventions' **Build shape** first: one read-only agent per feature, all in one message, each returning its groups, longest chain and risk reasons, while you read the machine and the timings once. Then offer each feature its Sequential and Parallel options, each with its time range, risk and reasons, and write the choice to its Delivery. This is the last question of the run: once the user has chosen, nothing asks them again.
 5. When the user adds detail instead of answering, fold it into that brief and ask only what remains. When the user says "best guess", "use your defaults" or "don't ask me", settle the rest as brainstorm step 5 says, and take the lower-risk build shape.
 6. Write each answer into `questions.md` with **Source** "the user, run question session". Set a brief to `accepted` when none of its questions is `open` and it has an approach. A feature with a question still open stays `draft` and leaves this run; say which.
@@ -95,7 +96,7 @@ var epicFlow = startFlow({
 Drive this queue through completion following `docs/codex-runtime.md`. The adapter
 uses the original event-driven scheduler; Codex performs the requested agent jobs.
 
-`from` and `to` are among `technical-plan`, `decompose`, `gaps`, `build`, `verify`. Each feature runs its stages in order. Features that do not depend on each other run at once. A feature with `after` waits until those features are done, and is not started if one of them stopped. Set `after` from the briefs and plans: a feature that needs another's result comes after it. When you cannot tell whether two features depend on each other, say so and chain them with `after` rather than guess they are independent. After each stage an independent checker tests that stage's **Done when** against the files, and one repair round follows a failed check. A `waiting` or `blocked` stage stops that feature and the others go on. A failed verify sends the feature back to build, at most `verifyRounds` times. The workflow is event-driven: a feature starts the moment the features it needs are done, and inside build each piece starts the moment its inputs exist (the next task's brief is prepared while the current task builds, each task's tests run as it lands, the acceptance tests are written alongside the build, and a parallel group starts the moment the groups it needs have merged).
+`from` and `to` are among `technical-plan`, `decompose`, `gaps`, `build`, `verify`. Each feature runs its stages in order. Features that do not depend on each other run at once. A feature with `after` waits until those features are done, and is not started if one of them stopped. Set `after` from the briefs and plans: a feature that needs another's result comes after it. When you cannot tell whether two features depend on each other, say so and chain them with `after` rather than guess they are independent. After each stage an independent checker tests that stage's **Done when** against the files, and one repair round follows a failed check. A `waiting` or `blocked` stage stops that feature and the others go on. When build is within the requested range, a failed verify sends the feature back to build, at most `verifyRounds` times. The workflow is event-driven: a feature starts the moment the features it needs are done, and inside build each piece starts the moment its inputs exist (the next task's brief is prepared while the current task builds, each task's tests run as it lands, the acceptance tests are written alongside the build, and a parallel group starts the moment the groups it needs have merged).
 
 Before starting it, tell the user in one line how many features and which ranges, and that they can leave. Give no time estimate unless one comes from measured runs on this machine.
 
@@ -116,7 +117,7 @@ Then one line: answer the questions and run `$epic-flow-run` again; each feature
 ## Done when
 
 - [ ] Every feature in the run has a `status.md` whose last line is later than the run's start.
-- [ ] Every feature that left the run early has its reason in `status.md` or in the report.
+- [ ] Every feature that left the run early has its reason in `status.md`.
 - [ ] Every brief the question session accepted has no `open` question in `questions.md`.
 - [ ] Every feature whose range includes decompose or build has **Build shape** in its Delivery, with the estimate it was chosen from, before the unattended part starts.
 - [ ] The report names each feature's stage, outcome, open questions and branch.

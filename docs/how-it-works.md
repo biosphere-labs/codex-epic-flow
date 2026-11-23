@@ -87,7 +87,7 @@ operations described in their stage instructions.
 
 ## Checks along the way
 
-- **An independent checker after every stage.** It tests the stage's exit list against the files and re-runs the commands the records cite as evidence. One repair round follows a failed check. A second failure stops that feature, with the reasons.
+- **An independent checker after each completed technical-plan through verify stage.** It tests the stage's exit list against the files and re-runs the commands the records cite as evidence. One repair round follows a failed check. A second failure stops that feature, with the reasons.
 - **Gap review with two blind reviewers.** One asks what a builder would get wrong. The other asks what the plan requires that no task delivers. Neither sees the other's findings until both are written.
 - **Falsification probes in verify.** For each criterion, verify disables the implementation, then cuts the entry point (the route, the subscription, the scheduled job). The test must fail both times. A test that stays green under a probe doesn't prove anything.
 - **Verify sends work back.** A failed criterion reopens the tasks responsible, and the run builds them again, up to a set number of rounds.

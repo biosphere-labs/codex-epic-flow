@@ -27,7 +27,7 @@ Write `build shape: <sequential|parallel>, <n> tasks, <n> groups, <reason when i
 ## Groups
 
 - The unit of grouping is the dependence slice: an entry point, everything it calls, and the data shapes that flow along those calls. Files are storage: two functions in one file can be unrelated, and a function and its caller usually live in different files.
-- Run `<plugin>/scripts/slice.mjs` with each `open` task's entry points and every frozen contract declaration (`--frozen`), where the language allows (TypeScript; run it with no arguments for its usage). A frozen node is a boundary: the walk stops there and it links no tasks. Add edges it cannot see with `--edge` (functions chosen at runtime, event emitters, dependency injection, dynamic imports, HTTP, files, the database). Elsewhere, group by calls and the data they pass. Say which edges you added by hand.
+- Run `<plugin>/scripts/slice.mjs` with each `open` task's entry points and every frozen contract declaration (`--frozen`), where the language allows (TypeScript; run it with no arguments for its usage). A frozen node is a boundary: the walk stops there and it links no tasks. Add edges it cannot see with `--edge` (functions chosen at runtime, event emitters, dependency injection, dynamic imports, HTTP, files, the database). Elsewhere, group by calls and the data they pass. Say which edges you added by hand. If slicing fails or reports unresolved entries, correct the input or group the uncertain tasks sequentially before dispatch.
 - A large group's `sharedNodes` are the candidates to freeze next; freezing is what buys parallelism. On a fresh skeleton, stubs have no bodies, so slices under-group: group by aggregate instead, one group per aggregate with the use cases that change it.
 - Build the dependence graph from the slices, `builds_against` and `depends_on`. A group that needs another group's result (an output no frozen contract covers) runs after it. When you cannot tell whether two groups depend on each other, write "dependence unknown".
 - Tasks whose slices share an unfrozen node are one group with one writer. Never group by file, by task id order, or in fixed pairs.
@@ -44,7 +44,7 @@ While one task builds, a read-only agent prepares the next one's brief in `notes
 
 ### Test as each task lands
 
-When a task is committed, a background agent runs that task's tests and its examples, in a scratch worktree at the feature branch tip, while the next task builds. A failure sets the task `open` with the diagnostic under **Check**, and the tasks that depend on it are not started. A break shows minutes after it lands, not at the end.
+When a task is committed, a background agent runs that task's tests and its examples, in a detached scratch worktree at the full commit SHA returned by that task’s builder, while the next task builds. A failure sets the task `open` with the diagnostic under **Check**, and the tasks that depend on it are not started. A break shows minutes after it lands, not at the end.
 
 ### Acceptance tests during the build
 
@@ -93,6 +93,10 @@ With `contract: none`, every seam in the code matches the signature its producin
 - A failed check leaves the task `open`, with the failure under **Check**.
 - When the code and a task disagree, leave the task `open`, write what disagrees, and send it back to gaps before building it.
 
+## Contract recovery limit
+
+The run permits up to four contract waves per build invocation, with a lower or higher explicit `contractRounds` run argument when needed. A repeated identical request stops sooner. When the limit is reached, preserve the blocked tasks and diagnostics for the next run.
+
 ## Time budget
 
 When the Delivery time budget is spent, counted from the `build started` line in `status.md`, start no new task or group. Let running ones finish and merge. Write `budget spent` and the `open` task ids to `status.md`.
@@ -100,7 +104,7 @@ When the Delivery time budget is spent, counted from the `build started` line in
 ## Delivery
 
 - Commit on the feature branch, and on group branches when parallel. Never on the base branch.
-- Push and open a PR only when Delivery says so, against the branch it names. The PR body lists each acceptance criterion, the tasks that serve it, and their check results.
+- Leave delivery to verify after its independent check. A build-only run ends with local commits.
 
 ## Progress
 
@@ -121,6 +125,8 @@ When every task is `closed`, leave the technical plan `in-progress`. Alone, stop
 - [ ] With a contract commit: the feature branch in `<repo>/.worktrees/<slug>/` contains it and has commits after it; `git diff <contract>` is empty for each `whole` contract file and touches only stub bodies in each `declarations` file, or `status.md` records a contract wave for each changed declaration.
 - [ ] With `contract: none`: the feature branch has a commit for each closed task, and each seam a task produced exists in the code with the signature that task wrote.
 - [ ] No commit this build made on the feature branch is on the base branch.
-- [ ] If Delivery says no push, the feature branch has no upstream. If a PR was opened, its URL is in `status.md`.
+- [ ] This build made no push or PR.
 - [ ] When an acceptance branch was written, it exists as `<branch>-acceptance` with a commit, and it changes only test files.
 - [ ] `status.md` has a `build finished` line.
+
+When one group requests a contract change, drain existing writers and merge attempts but start no merge-retry writer on the old contract. Resolve the contract wave even if a sibling or acceptance-test author also failed. Preserve those other failures: stop after the wave and resume them from disk instead of declaring the build done.
